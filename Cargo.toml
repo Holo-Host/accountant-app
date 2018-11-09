@@ -1,5 +1,5 @@
 [workspace]
 
 members = [
-  "zomes/hosts/code",
+  "zomes/service/code",
 ]
