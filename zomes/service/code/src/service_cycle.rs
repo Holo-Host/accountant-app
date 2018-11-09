@@ -2,7 +2,14 @@ use hdk::{
     self,
     entry_definition::ValidatingEntryType,
     error::{ZomeApiError, ZomeApiResult},
-    holochain_core_types::{hash::HashString, validation::EntryAction},
+    holochain_core_types::{
+        entry::Entry,
+        entry_type::EntryType,
+        error::HolochainError,
+        hash::HashString,
+        json::{DefaultJson, JsonString},
+        validation::EntryAction,
+    },
     holochain_dna::zome::entry_types::Sharing,
 };
 use serde::Serialize;
@@ -12,7 +19,7 @@ use super::util;
 
 const ENTRY_NAME: &str = "service_cycle";
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, DefaultJson)]
 pub struct ServiceCycle {
     pub agent_key: String,
     pub request_hash: HashString,
@@ -22,13 +29,13 @@ pub struct ServiceCycle {
 }
 
 /// The data which the client will sign
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, DefaultJson)]
 struct SignedData {
     // metrics: ServiceMetrics,
     response_hash: HashString,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ServiceMetrics {
     pub cpu_seconds: f64,
     pub bytes_in: usize,
@@ -77,26 +84,42 @@ pub fn log_service<S, T>(
     request_payload: S,
     response_payload: T,
     metrics: ServiceMetrics,
-) -> ZomeApiResult<HashString>
+) -> JsonString
 where
-    S: Serialize,
-    T: Serialize,
+    S: Into<JsonString>,
+    T: Into<JsonString>,
 {
-    let log = ServiceCycle {
-        agent_key,
-        metrics,
-        request_hash: util::make_hash(request_payload),
-        response_hash: util::make_hash(response_payload),
-        signature: None,
+    let inner = || -> ZomeApiResult<HashString> {
+        let log = ServiceCycle {
+            agent_key,
+            metrics,
+            request_hash: util::make_hash(request_payload),
+            response_hash: util::make_hash(response_payload),
+            signature: None,
+        };
+        let json = serde_json::to_value(log).unwrap();
+        hdk::commit_entry(&Entry::new(ENTRY_NAME.into(), json))
     };
-    let json = serde_json::to_value(log).unwrap();
-    hdk::commit_entry(ENTRY_NAME, json)
+    inner()
+        .map(JsonString::from)
+        .unwrap_or_else(JsonString::from)
 }
 
-pub fn add_signature(entry_hash: HashString, signature: String) -> ZomeApiResult<HashString> {
-    let mut entry: ServiceCycle =
-        hdk::get_entry(entry_hash.clone())?.ok_or(ZomeApiError::HashNotFound)?;
-    entry.signature = Some(signature);
-    let updated = serde_json::to_value(entry).map_err(|e| ZomeApiError::Internal(e.to_string()))?;
-    hdk::update_entry(ENTRY_NAME, updated, entry_hash)
+/// TODO: unimplementable until hdk::update_entry works
+pub fn add_signature(_entry_hash: HashString, _signature: String) -> ZomeApiResult<HashString> {
+    unimplemented!()
+    //     let entry = hdk::get_entry(entry_hash.clone())?.ok_or(ZomeApiError::HashNotFound)?;
+    //     match *entry.entry_type() {
+    //         ENTRY_TYPE => {
+    //             let mut value: ServiceCycle = serde_json::to_value(String::from(*entry.value()))
+    //                 .map_err(|_| ZomeApiError::HashNotFound)?
+    //                 .into();
+    //             value.signature = Some(signature);
+    //             let updated =
+    //                 serde_json::to_value(entry).map_err(|e| ZomeApiError::Internal(e.to_string()))?;
+    //             hdk::update_entry(ENTRY_NAME, updated, entry_hash)
+    //         }
+    //         _ => Err(ZomeApiError::HashNotFound),
+    //     }
+    // }
 }
